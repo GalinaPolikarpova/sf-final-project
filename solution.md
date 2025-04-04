@@ -261,3 +261,53 @@ order by t1.month
 --Рекомендуется провести работу по привлечению новых пользователей (в частности, корпоративных).
 --Рекомендуется рассмотреть запуск акций и скидок в периоды спада активности
 
+-- Дополнительное задание 2
+
+--Для выгрузки данных используем SQL-запрос:
+with t as (
+	select created_at
+	from codesubmit
+	union
+	select created_at
+	from coderun
+	union
+	select created_at
+	from teststart
+)
+select 
+	distinct(to_char(created_at, 'HH24:00')) as hour,
+	count(case when to_char(created_at, 'dy') ='mon' then created_at else null end) as mon,
+	count(case when to_char(created_at, 'dy') ='tue' then created_at else null end) as tue,
+	count(case when to_char(created_at, 'dy') ='wed' then created_at else null end) as wed,
+	count(case when to_char(created_at, 'dy') ='thu' then created_at else null end) as thu,
+	count(case when to_char(created_at, 'dy') ='fri' then created_at else null end) as fri,
+	count(case when to_char(created_at, 'dy') ='sat' then created_at else null end) as sat,
+	count(case when to_char(created_at, 'dy') ='sun' then created_at else null end) as sun
+from t
+group by hour
+order by hour
+
+
+#Для загрузки данных и построения графика используем такой код в Python:
+import pandas as pd
+import matplotlib.pyplot as plt
+df = pd.read_csv('activity_export.csv')
+df.head()
+#прочитали файл, посмотрели, всё ли ок в таблице
+#рисуем 7 графиков (для каждого дня недели), чтобы наглядно была видна динамика активности пользователей (ось y) в каждый день в разбивке по часам (ось x)
+plt.figure(figsize=(10, 5))
+for column in df.columns:
+    plt.plot(df.index, df[column], label=column)
+plt.title('Number of users per time and days of the week')
+plt.legend(title='days')
+plt.xlabel('time')
+plt.ylabel('users')
+plt.grid(True)
+plt.xticks(rotation=90)
+plt.show()
+
+#Выводы:
+#Пользователи проявляют активность на платформе чаще всего в будние дни (можно выделить четверг), реже всего - в выходные.
+#Наименьшая активность наблюдается в ночные часы (с 0 до 3 часов), наибольшая - в дневные (примерно с 10 до 14 часов в будни и с 13 до 15 в выходные). 
+#В будние дни также наблюдается рост активности утром (в районе 8 часов) и вечером (в районе 18 часов).
+#Рекомендуется производить релизы (выкатывать новый функционал на платформу) в выходные в ночные часы, поскольку в это время активность пользователей платформы минимальна
