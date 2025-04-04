@@ -136,7 +136,128 @@ with e as (
 	union
 	select distinct user_id
 	from teststart
+
+ 
 )
 select round(count(*) *100.0 / (select count(*) from users),2) as active_users_share
 from e
 --Вывод: Доля пользователей, которые решали хотя бы одну задачу или начинали проходить хотя бы один тест от общего числа пользователей - 63.48%
+
+--ДОПОЛНИТЕЛЬНОЕ ЗАДАНИЕ
+--Предлагаю рассмотреть дополнительные метрики:
+
+--Если я правильно понимаю, то в поле referal_user в таблице users содержится информация о пользователях, которые воспользовались реферальной программой
+--Проанализируем долю пользователей, которые пришли на платформу благодаря реферальной программе
+with t as (
+	select id, referal_user 
+	from users u 
+	where referal_user>0
+)
+select count (id)*100.0 / (select count(*) from users) as share_ref
+from t
+--Вывод: Видим, что доля пользователей, которые пришли на платформу благодаря реферальной программе, невысокая (менее 3%)
+--Рекомендуется рассмотреть варианты улучшения реферальной программы для того, чтобы привлекать больше новых пользователей
+
+--Если я правильно понимаю, то в поле company_id в таблице users содержится информация о пользователях, связанных с компаниями (корпоративные клиенты)
+--Проанализируем активность пользователей, связанных с компаниями
+
+--Добавим в когортный анализ возможность рассмотрения данных при условии группировки по company_id:
+with a as (
+	select 
+		company_id,
+		u2.id, 
+		to_char(u2.date_joined, 'YYYY-MM') as cohort, 
+		extract (days from u1.entry_at - u2.date_joined) as diff
+	from userentry u1
+	join users u2
+	on u1.user_id = u2.id
+	where to_char(u2.date_joined, 'YYYY-MM') >= '2022-01'
+)
+select 
+	cohort,
+	company_id,
+	count (distinct case when diff >= 0 then id end)*100.0 / count (distinct case when diff >= 0 then id end) as "0 day",
+	round (count (distinct case when diff >= 1 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "1 day",
+	round (count (distinct case when diff >= 3 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "3 day",
+	round (count (distinct case when diff >= 7 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "7 day",
+	round (count (distinct case when diff >= 14 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "14 day",
+	round (count (distinct case when diff >= 30 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "30 day",
+	round (count (distinct case when diff >= 60 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "60 day",
+	round (count (distinct case when diff >= 90 then id end)*100.0 / count (distinct case when diff >= 0 then id end),2) as "90 day"
+from a
+group by cohort, company_id
+--Вывод: Видим, что retention у пользователей с ненулевым company_id выше
+
+--Также добавим в анализ количества решаемых задач возможность рассмотрения данных при условии группировки по company_id:
+with t as
+	(select user_id, company_id, count(distinct c.problem_id) as cnt
+	from coderun c
+	left join users u 
+	on u.id = c.user_id 
+	group by user_id, company_id
+	order by user_id 
+) 
+select company_id, round(avg(cnt),1) as problems_avg
+from t
+group by company_id
+--Вывод: Видим, что в большинстве случаев среднее количество задач у пользователей с ненулевым company_id выше
+
+with t as (
+	select distinct user_id, company_id
+	from userentry u 
+	join users u2 
+	on u.user_id = u2.id
+	where company_id>0
+	order by user_id
+)
+select count (user_id)*100.0 / (select count(*) from users) as share_company
+from t
+--Доля таких клиентов на текущий момент составляет менее 9%. Пользователи с ненулевым company_id проявляют себя наиболее активно на платформе, но доля таких клиентов
+--не велика. В связи с этим можно сделать вывод о том, что в данном случае целесообразно развивать бизнес-отношения с корпоративными клиентами и 
+--продавать им долгосрочные подписки (на полгода, год)
+
+--Также можно выполнить анализ количества регистраций и входов пользователей по месяцам для того, чтобы выявить периоды, 
+--когда необходимо простимулировать потенциальных клиентов к покупке подписки
+
+with t1 as (
+	select 
+		to_char(date_joined, 'YYYY-MM') as month, 
+		count(id) as joined_cnt
+	from users
+	group by month
+	order by month
+),
+t2 as (
+	select 
+		to_char(entry_at, 'YYYY-MM') as month, 
+		count(distinct user_id) as entry_cnt
+	from userentry
+	group by month
+	order by month
+)
+select 
+	t1.month,  
+	coalesce(joined_cnt,0) as joined_cnt, 
+	coalesce(entry_cnt,0) as entry_cnt
+from t1
+full join t2
+on t1.month=t2.month
+order by t1.month
+
+--Данных пока не так много, но очевиден спад в период с мая по август, что логично (подобным направлениям бизнеса свойственна такая картина в период отпусков и каникул). 
+--Можно порекомендовать запуск акций, скидок в данный период.
+--Также видим резкий скачок количества регистраций и входов в феврале 2022 года. Нужно проанализовать причины данного скачка. Возможно, была запущена какая-то выгодная акция,
+--которую надо будет повторять время от времени для привлечения новых клиентов. Возможно, здесь были задействованы внешние факторы, подтолкнувшие людей, которые давно
+--задумывались о начале обучения или о смене профессии, наконец приступить к задуманному.
+
+
+
+------------------------------------------Итоговые выводы по смене модели монетизации
+--По результатам анализа очевидно, что модель должна быть изменена (в частности, из-за невысокой заинтересованности пользователей в трате коинов).
+--Если оставлять модель без изменений, то необходимо предпринять действия, направленные на повышение заинтересованности пользователей в использовании коинов. 
+--Необходимо рассмотреть различные варианты подписок (по сроку и наполнению).
+--Стоимость подписки можно определить, отталкиваясь от медианного баланса. 
+--Необходимо наблюдать за динамикой активности пользователей платформы, чтобы отследить эффект от нововведений, и в зависимости от данного эффекта запланировать пересмотр цен на следующем этапе.
+--Рекомендуется провести работу по привлечению новых пользователей (в частности, корпоративных).
+--Рекомендуется рассмотреть запуск акций и скидок в периоды спада активности
+
